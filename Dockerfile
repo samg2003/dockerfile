@@ -1,43 +1,67 @@
-FROM debian:8.5
-
-# Install anaconda
-RUN apt-get update --fix-missing && apt-get install -y wget bzip2 ca-certificates \
-    libglib2.0-0 libxext6 libsm6 libxrender1 \
-    git mercurial subversion
-RUN echo 'export PATH=/opt/conda/bin:$PATH' > /etc/profile.d/conda.sh && \
-    wget --quiet https://repo.continuum.io/archive/Anaconda2-2.5.0-Linux-x86_64.sh && \
-    /bin/bash /Anaconda2-2.5.0-Linux-x86_64.sh -b -p /opt/conda && \
-    rm /Anaconda2-2.5.0-Linux-x86_64.sh
-
-RUN apt-get install -y curl grep sed dpkg && \
-    TINI_VERSION=`curl https://github.com/krallin/tini/releases/latest | grep -o "/v.*\"" | sed 's:^..\(.*\).$:\1:'` && \
-    curl -L "https://github.com/krallin/tini/releases/download/v${TINI_VERSION}/tini_${TINI_VERSION}.deb" > tini.deb && \
-    dpkg -i tini.deb && \
-    rm tini.deb && \
-    apt-get clean
-
-ENV PATH /opt/conda/bin:$PATH
-
-# http://bugs.python.org/issue19846
-# > At the moment, setting "LANG=C" on a Linux system *fundamentally breaks Python 3*, and that's not OK.
+FROM nvidia/cuda:9.2-base-ubuntu16.04
+# See http://bugs.python.org/issue19846
 ENV LANG C.UTF-8
+LABEL com.nvidia.volumes.needed="nvidia_driver"
 
-# Java, C#, R, etc. requirements
-RUN apt-get update && apt-get install -y --fix-missing openjdk-7-jre r-base mono-runtime libgomp1 libc6
+RUN echo "deb http://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu1604/x86_64 /" > /etc/apt/sources.list.d/nvidia-ml.list
 
-# Fix for 'xgboost' missing
-RUN conda install libgcc
+RUN apt-get update && apt-get install -y --no-install-recommends \
+         build-essential \
+         cmake \
+         git \
+         curl \
+         vim \
+         ca-certificates \
+         python-qt4 \
+         libjpeg-dev \
+         zip \
+         unzip \
+         python-opencv \
+         libpng-dev &&\
+     rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y \
+		python-numpy \
+		python-scipy \
+		python-nose \
+		python-h5py \
+		python-skimage \
+		python-matplotlib \
+		python-pandas \
+		python-sklearn \
+		python-sympy \
+		&& \
+	apt-get clean && \
+	apt-get autoremove && \
+	rm -rf /var/lib/apt/lists/*
 
-RUN echo "deb http://http.us.debian.org/debian/ testing non-free contrib main" > /etc/apt/sources.list && \
-    apt-get update && \
-    apt-get -y -t testing install python3.6 python3-pip
 
-RUN pip3 install \
-        theano==0.9.0 \
-        Cython==0.27.3 \
-        numpy==1.14.0 \
-        scipy==1.0.0 \
-        scikit-learn==0.19.1 \
-        pandas==0.22.0 \
-        pyyaml==3.12 \
-        fastai==1.0.61 
+ENV LD_LIBRARY_PATH /usr/local/nvidia/lib:/usr/local/nvidia/lib64
+ENV PYTHON_VERSION=3.6
+
+RUN curl -o ~/miniconda.sh -O  https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh  && \
+     chmod +x ~/miniconda.sh && \
+     ~/miniconda.sh -b -p /opt/conda && \
+     rm ~/miniconda.sh && \
+    /opt/conda/bin/conda install conda-build
+
+ENV PATH=$PATH:/opt/conda/bin/
+ENV USER fastai
+# Create Enviroment
+COPY enviroment.yaml /enviroment.yaml
+RUN conda env create -f enviroment.yaml
+
+WORKDIR /notebooks
+# Activate Source
+CMD source activate fastai
+CMD source ~/.bashrc
+
+RUN chmod -R a+w /notebooks
+WORKDIR /notebooks
+
+# Clone course-v3
+RUN git clone https://github.com/fastai/course-v3.git
+
+COPY config.yml /root/.fastai/config.yml
+COPY run.sh /run.sh
+
+CMD ["/run.sh"]
